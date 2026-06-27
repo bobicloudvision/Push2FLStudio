@@ -1,0 +1,8 @@
+# Display daemon dependencies (the external process).
+# The FL Studio script half has NO dependencies — it runs in FL's
+# sandboxed Python 3.9 and may only use built-ins + the FL API modules.
+
+pyusb>=1.2.1        # USB bulk transfer to the Push 2 display (needs libusb installed)
+Pillow>=10.0.0      # Framebuffer rendering
+mido>=1.3.0         # MIDI parsing
+python-rtmidi>=1.5.0  # mido backend for real MIDI ports

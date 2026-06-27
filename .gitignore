@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.python-version
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+
+# Logs / runtime
+*.log
+
+# Vendored reference clone (Ableton spec) — has its own nested .git.
+# Keep locally for reference; don't commit. Make it a submodule if you
+# want it tracked.
+push-interface/

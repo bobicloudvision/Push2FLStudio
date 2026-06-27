@@ -92,8 +92,9 @@ def _refresh_white_buttons():
 def _refresh_transport():
     playing = transport.isPlaying()
     recording = transport.isRecording()
-    _btn_led(p2.BTN_PLAY, p2.PAD_GREEN if playing else p2.PAD_OFF)
-    _btn_led(p2.BTN_RECORD, p2.PAD_RED if recording else p2.PAD_OFF)
+    # Default white; light up in their state color when active.
+    _btn_led(p2.BTN_PLAY, p2.PAD_GREEN if playing else p2.PAD_WHITE)
+    _btn_led(p2.BTN_RECORD, p2.PAD_RED if recording else p2.PAD_WHITE)
     _btn_led(p2.BTN_STOP, p2.PAD_WHITE)
 
     bpm = int(round(mixer.getCurrentTempo() / 1000.0))

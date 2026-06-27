@@ -2,21 +2,20 @@
 # url=https://github.com/Ableton/push-interface
 # supportedDevices=Ableton Push 2
 #
-# Main controller surface for the Ableton Push 2 in FL Studio.
+# Controller surface for the Ableton Push 2 in FL Studio.
 #
-# Responsibilities:
-#   * Translate Push 2 controls (pads, encoders, transport buttons) into FL
-#     actions via the transport / mixer / channels modules.
-#   * Drive Push 2 pad/button LEDs (this script's OUTPUT port = Push 2).
-#   * Mirror FL state to the display daemon by DISPATCHING SysEx to the
-#     companion "Push 2 Display Out" script, which owns the virtual MIDI port.
+# Milestone 1: DRUM PADS + TRANSPORT.
+#   * Each pad triggers one Channel Rack channel (bottom-left pad = channel 0,
+#     left-to-right, bottom-to-top). Velocity-sensitive.
+#   * Pads with a channel are lit; pressing one flashes it white.
+#   * Play / Stop / Record buttons drive the FL transport, with LED feedback.
 #
-# Why dispatch?  An FL controller script writes MIDI to exactly ONE output
-# port. This script's output is the Push 2 (for LEDs), so it cannot also
-# write to the IAC/loopMIDI bus. device.dispatch() hands the SysEx to the
-# companion script, whose output IS that bus. See fl_script/README.md.
+# State mirroring to the display daemon is kept but guarded — it is a no-op if
+# the companion "Push 2 Display Out" script isn't set up, so this milestone
+# can be tested without the display.
 
 import transport
+import channels
 import mixer
 import device
 
@@ -25,7 +24,6 @@ import protocol as proto
 
 NUM_TRACKS = 8
 
-# Cache of last-sent state so we only mirror what changed.
 _last = {
     "playing": None,
     "recording": None,
@@ -37,113 +35,143 @@ _last = {
 
 
 # --------------------------------------------------------------------------
-# Mirroring to the display daemon
+# Low-level LED helpers
+# --------------------------------------------------------------------------
+def _pad_led(note, color):
+    # Note On, channel 1: velocity = palette color index.
+    device.midiOutMsg(0x90 + (note << 8) + (color << 16))
+
+
+def _btn_led(cc, value):
+    # CC, channel 1: value = palette index (RGB buttons) or brightness (white).
+    device.midiOutMsg(0xB0 + (cc << 8) + (value << 16))
+
+
+def _pad_to_channel(note):
+    """Pad note -> Channel Rack channel index (or -1 if out of grid)."""
+    idx = note - p2.PAD_NOTE_MIN
+    return idx if 0 <= idx < p2.PAD_ROWS * p2.PAD_COLS else -1
+
+
+# --------------------------------------------------------------------------
+# Display mirroring (guarded; optional for this milestone)
 # --------------------------------------------------------------------------
 def _mirror(sysex_bytes):
-    """Forward a SysEx message to the companion display-out script.
+    try:
+        device.dispatch(0, 0xF0, sysex_bytes)
+    except Exception:
+        pass  # companion display-out script not configured — fine
 
-    ctrlIndex 0 = first script that declares `receiveFrom` this controller.
-    """
-    device.dispatch(0, 0xF0, sysex_bytes)
+
+# --------------------------------------------------------------------------
+# Pad LEDs
+# --------------------------------------------------------------------------
+def _refresh_pads():
+    """Light pads that map to an existing channel; others off."""
+    count = channels.channelCount()
+    for note in range(p2.PAD_NOTE_MIN, p2.PAD_NOTE_MAX + 1):
+        idx = _pad_to_channel(note)
+        if 0 <= idx < count:
+            _pad_led(note, p2.PAD_BLUE)
+        else:
+            _pad_led(note, p2.PAD_OFF)
 
 
-def _push_transport():
+# --------------------------------------------------------------------------
+# Transport LEDs
+# --------------------------------------------------------------------------
+WHITE_BTN_GLOW = 25  # soft default brightness for white buttons
+
+
+def _refresh_white_buttons():
+    """Softly light all supported white buttons so it's clear the script is on."""
+    for cc in p2.BUTTONS_WHITE:
+        _btn_led(cc, WHITE_BTN_GLOW)
+
+
+def _refresh_transport():
     playing = transport.isPlaying()
     recording = transport.isRecording()
+    _btn_led(p2.BTN_PLAY, p2.PAD_GREEN if playing else p2.PAD_OFF)
+    _btn_led(p2.BTN_RECORD, p2.PAD_RED if recording else p2.PAD_OFF)
+    _btn_led(p2.BTN_STOP, p2.PAD_WHITE)
+
     bpm = int(round(mixer.getCurrentTempo() / 1000.0))
     if (playing, recording, bpm) != (_last["playing"], _last["recording"], _last["bpm"]):
         _last.update(playing=playing, recording=recording, bpm=bpm)
         _mirror(proto.transport(playing, recording, bpm))
 
 
-def _push_tracks():
-    sel = mixer.trackNumber()
-    if sel != _last["selected"]:
-        _last["selected"] = sel
-        _mirror(proto.selected_track(min(sel, NUM_TRACKS - 1)))
-
-    for i in range(NUM_TRACKS):
-        name = mixer.getTrackName(i)
-        if name != _last["names"][i]:
-            _last["names"][i] = name
-            _mirror(proto.track_name(i, name))
-
-        # peak level 0.0..~1.0 -> 0..127
-        peak = mixer.getTrackPeaks(i, 0)  # 0 = left/mono
-        level = max(0, min(127, int(peak * 127)))
-        if level != _last["levels"][i]:
-            _last["levels"][i] = level
-            _mirror(proto.track_level(i, level))
-
-
 # --------------------------------------------------------------------------
 # FL Studio callbacks
 # --------------------------------------------------------------------------
 def OnInit():
+    _refresh_pads()
+    _refresh_white_buttons()
+    _refresh_transport()
     _mirror(proto.clear())
-    # TODO: send Push 2 into the desired mode / set up the pad LED layout.
 
 
 def OnDeInit():
+    # Turn everything off on unload.
+    for note in range(p2.PAD_NOTE_MIN, p2.PAD_NOTE_MAX + 1):
+        _pad_led(note, p2.PAD_OFF)
+    _btn_led(p2.BTN_PLAY, p2.PAD_OFF)
+    _btn_led(p2.BTN_RECORD, p2.PAD_OFF)
+    _btn_led(p2.BTN_STOP, p2.PAD_OFF)
+    for cc in p2.BUTTONS_WHITE:
+        _btn_led(cc, p2.PAD_OFF)
     _mirror(proto.clear())
 
 
 def OnMidiMsg(event):
-    """Central handler for incoming Push 2 MIDI."""
     status = event.status & 0xF0
 
-    # Notes 0x90/0x80 -> pads
+    # Pads -> Channel Rack channels
     if status in (0x90, 0x80):
         if p2.is_pad(event.data1):
             _handle_pad(event)
             event.handled = True
         return
 
-    # CC 0xB0 -> encoders + buttons
-    if status == 0xB0:
-        cc, val = event.data1, event.data2
-        if cc in p2.ENCODER_TRACK_CC:
-            _handle_encoder(p2.ENCODER_TRACK_CC.index(cc), p2.decode_relative(val))
-            event.handled = True
-        elif val == 127:  # button press only
-            _handle_button(cc)
-            event.handled = True
+    # Buttons (press only)
+    if status == 0xB0 and event.data2 == 127:
+        _handle_button(event.data1)
+        event.handled = True
 
 
 def _handle_pad(event):
-    velocity = event.data2 if (event.status & 0xF0) == 0x90 else 0
-    # TODO: route to FL — e.g. channels.midiNoteOn / step sequencer / drum pads.
-    # Placeholder: light the pad while held.
-    device.midiOutMsg((0x90, event.data1, p2.PAD_GREEN if velocity else p2.PAD_OFF))
-
-
-def _handle_encoder(index, delta):
-    # Placeholder: encoder N nudges mixer track N+1 volume.
-    track = index + 1
-    vol = mixer.getTrackVolume(track)
-    mixer.setTrackVolume(track, max(0.0, min(1.0, vol + delta * 0.01)))
+    note = event.data1
+    idx = _pad_to_channel(note)
+    if idx < 0 or idx >= channels.channelCount():
+        return
+    pressed = (event.status & 0xF0) == 0x90 and event.data2 > 0
+    # Play the channel (note 60 = middle C) at the pad's velocity.
+    channels.midiNoteOn(idx, 60, event.data2 if pressed else 0)
+    _pad_led(note, p2.PAD_WHITE if pressed else p2.PAD_BLUE)
 
 
 def _handle_button(cc):
     if cc == p2.BTN_PLAY:
         transport.start()
+    elif cc == p2.BTN_STOP:
+        transport.stop()
     elif cc == p2.BTN_RECORD:
         transport.record()
     elif cc == p2.BTN_METRONOME:
         transport.globalTransport(110, 1)  # FPT_Metronome
-    # TODO: map remaining transport/global buttons.
+    _refresh_transport()
 
 
 def OnRefresh(flags):
-    _push_transport()
-    _push_tracks()
+    _refresh_pads()
+    _refresh_white_buttons()
+    _refresh_transport()
 
 
 def OnUpdateBeatIndicator(value):
-    # value: 0 off, 1 bar, 2 beat — good hook for a flashing tempo LED.
     pass
 
 
 def OnIdle():
-    # Meters change continuously; refresh them off the idle tick.
-    _push_tracks()
+    pass

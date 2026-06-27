@@ -54,8 +54,7 @@ _btn_cache = {}                        # cc -> last value sent
 _mode = "drum"
 _root = 48                             # root note (C3); octave buttons shift it
 IN_KEY_ROW_STEP = 3                    # scale-steps each row goes up (~a fourth)
-_scale = 0                             # ACTIVE scale (applied on Load)
-_scale_cursor = 0                      # browsing cursor in the scale screen
+_scale = 0                             # active scale (applied live as you browse)
 _scale_mode = False                    # scale screen open (Scale button toggles)
 
 
@@ -240,34 +239,33 @@ def OnMidiMsg(event):
 
 
 def _toggle_scale_mode():
-    global _scale_mode, _scale_cursor
+    global _scale_mode
     _scale_mode = not _scale_mode
-    if _scale_mode:
-        _scale_cursor = _scale           # start browsing from the active scale
     _btn_led(p2.BTN_SCALE, 127 if _scale_mode else WHITE_BTN_GLOW)
-    _btn_led(p2.BTN_LOAD, p2.PAD_WHITE if _scale_mode else WHITE_BTN_GLOW)
     _mirror_scale()
 
 
-def _move_cursor(cc):
-    global _scale_cursor
+def _change_scale(cc):
+    """Arrows pick a scale; it applies live (no Load step)."""
+    global _scale
     delta = {p2.BTN_LEFT: -1, p2.BTN_RIGHT: 1,
              p2.BTN_UP: -p2.SCALE_GRID_COLS,
              p2.BTN_DOWN: p2.SCALE_GRID_COLS}[cc]
-    _scale_cursor = max(0, min(scales.COUNT - 1, _scale_cursor + delta))
+    _scale = max(0, min(scales.COUNT - 1, _scale + delta))
+    _refresh_pads()
     _mirror_scale()
 
 
-def _load_scale():
-    """Apply the cursor scale as the active scale and repaint note pads."""
-    global _scale
-    _scale = _scale_cursor
+def _change_root(delta):
+    """Shift the key by a semitone (Page buttons) and relayout note pads."""
+    global _root
+    _root = max(0, min(127, _root + delta))
     _refresh_pads()
     _mirror_scale()
 
 
 def _mirror_scale():
-    _mirror(proto.scale(_scale_mode, _scale_cursor, _root % 12))
+    _mirror(proto.scale(_scale_mode, _scale, _root % 12))
 
 
 def _handle_pad(event):
@@ -293,18 +291,21 @@ def _handle_pad(event):
 
 
 def _handle_button(cc):
-    global _mode, _root
-    # Scale screen: toggle, navigate, load.
+    global _mode
     if cc == p2.BTN_SCALE:
         _toggle_scale_mode()
         return
-    if _scale_mode:
-        if cc in (p2.BTN_UP, p2.BTN_DOWN, p2.BTN_LEFT, p2.BTN_RIGHT):
-            _move_cursor(cc)
-            return
-        if cc == p2.BTN_LOAD:
-            _load_scale()
-            return
+    # Arrows pick the scale while the scale screen is open.
+    if _scale_mode and cc in (p2.BTN_UP, p2.BTN_DOWN, p2.BTN_LEFT, p2.BTN_RIGHT):
+        _change_scale(cc)
+        return
+    # Key (root) +/- a semitone, any time.
+    if cc == p2.BTN_PAGE_LEFT:
+        _change_root(-1)
+        return
+    if cc == p2.BTN_PAGE_RIGHT:
+        _change_root(1)
+        return
 
     if cc == p2.BTN_PLAY:
         transport.start()
@@ -319,12 +320,10 @@ def _handle_button(cc):
         _pad_cache.clear()                 # force full repaint
         _refresh_pads()
         _refresh_mode_leds()
-    elif cc == p2.BTN_OCTAVE_UP and _mode == "note":
-        _root = min(108, _root + 12)
-        _refresh_pads()
-    elif cc == p2.BTN_OCTAVE_DOWN and _mode == "note":
-        _root = max(0, _root - 12)
-        _refresh_pads()
+    elif cc == p2.BTN_OCTAVE_UP:
+        _change_root(12)
+    elif cc == p2.BTN_OCTAVE_DOWN:
+        _change_root(-12)
     _refresh_transport()
 
 

@@ -195,7 +195,7 @@ def _run_monitor(args) -> int:
                         state.update(msg)
                     if state.scale_menu_open:
                         frame = renderer.render_scale_menu(
-                            state.scale_index, loaded_index=state.loaded_scale)
+                            state.scale_index, state.scale_root)
                     else:
                         frame = renderer.render_monitor(state)
                     display.send_frame(frame)

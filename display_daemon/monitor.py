@@ -18,8 +18,8 @@ _ENC_CC = list(range(71, 79))
 
 # Buttons used by the on-display scale browser.
 CC_SCALE = 58             # toggle the scale screen on/off
-CC_LOAD = 20              # "Lower Row 1" display button = LOAD selected scale
 CC_UP, CC_DOWN, CC_LEFT, CC_RIGHT = 46, 47, 44, 45
+CC_PAGE_LEFT, CC_PAGE_RIGHT = 62, 63   # root key -/+ a semitone
 SCALE_COUNT = 23          # FL's 23 scales (see renderer.SCALE_NAMES)
 _SCALE_COLS = 4           # menu grid width, for up/down stepping
 
@@ -38,8 +38,8 @@ class MonitorState:
         self.encoders = [0] * 8       # accumulated 0..127
         self.events = 0
         self.scale_menu_open = False  # toggled by the Scale button
-        self.scale_index = 0          # cursor scale (navigated by arrows)
-        self.loaded_scale = 0         # the scale that was LOADed
+        self.scale_index = 0          # active scale (arrows apply it live)
+        self.scale_root = 0           # root pitch class 0..11 (Page buttons)
 
     def pad_rc(self):
         """(row, col) of the last note if it's a pad, else None."""
@@ -59,8 +59,8 @@ class MonitorState:
             cc, val = msg.control, msg.value
             if cc == CC_SCALE and val >= 64:
                 self.scale_menu_open = not self.scale_menu_open   # toggle on press
-            elif self.scale_menu_open and val >= 64 and cc == CC_LOAD:
-                self.loaded_scale = self.scale_index               # load selection
+            elif val >= 64 and cc in (CC_PAGE_LEFT, CC_PAGE_RIGHT):
+                self.scale_root = (self.scale_root + (1 if cc == CC_PAGE_RIGHT else -1)) % 12
             elif self.scale_menu_open and val >= 64 and cc in (CC_UP, CC_DOWN, CC_LEFT, CC_RIGHT):
                 delta = {CC_LEFT: -1, CC_RIGHT: 1,
                          CC_UP: -_SCALE_COLS, CC_DOWN: _SCALE_COLS}[cc]

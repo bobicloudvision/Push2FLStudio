@@ -40,19 +40,17 @@ SCALE_NAMES = (
 _PITCH_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 
 
-def draw_scale_menu(scale_index: int, scale_root: int = 0,
-                    loaded_index=None) -> Image.Image:
-    """Scale screen: a grid of all scale names. Cursor = blue box; the LOADed
-    scale = green. A soft LOAD hint sits over the lower-left display button."""
+def draw_scale_menu(scale_index: int, scale_root: int = 0) -> Image.Image:
+    """Scale screen: a grid of all scale names; the active one highlighted.
+    Header shows the current key + scale. Arrows pick the scale (applied live),
+    Page buttons change the key."""
     img = Image.new("RGB", (LINE_WIDTH, HEIGHT), (0, 0, 0))
     d = ImageDraw.Draw(img)
     root = _PITCH_NAMES[scale_root % 12]
     cur = SCALE_NAMES[scale_index] if scale_index < len(SCALE_NAMES) else "?"
-    header = f"SCALE   {root} {cur}"
-    if loaded_index is not None:
-        header += f"      loaded: {SCALE_NAMES[loaded_index]}"
-    d.text((8, 4), header, fill=(120, 200, 255), font=_FONT)
-    d.text((8, HEIGHT - 12), "[ lower-left btn = LOAD ]", fill=(90, 120, 90), font=_FONT)
+    d.text((8, 4), f"SCALE   {root}  {cur}", fill=(120, 200, 255), font=_FONT)
+    d.text((8, HEIGHT - 12), "arrows = scale    page = key",
+           fill=(90, 110, 90), font=_FONT)
 
     cols = 4   # 4 x 6 grid = 24 cells for 23 scales
     cell_w = LINE_WIDTH // cols
@@ -64,17 +62,14 @@ def draw_scale_menu(scale_index: int, scale_root: int = 0,
             d.rectangle([cx - 4, cy - 2, cx + cell_w - 8, cy + 13],
                         fill=(40, 90, 160))
             color = (255, 255, 255)
-        elif i == loaded_index:
-            color = (0, 220, 120)
         else:
             color = (170, 170, 170)
         d.text((cx, cy), name[:14], fill=color, font=_FONT)
     return img
 
 
-def render_scale_menu(scale_index: int, scale_root: int = 0,
-                      loaded_index=None) -> bytes:
-    return to_framebuffer(draw_scale_menu(scale_index, scale_root, loaded_index))
+def render_scale_menu(scale_index: int, scale_root: int = 0) -> bytes:
+    return to_framebuffer(draw_scale_menu(scale_index, scale_root))
 
 
 def draw(model: DisplayModel) -> Image.Image:

@@ -11,8 +11,12 @@ import argparse
 import math
 import time
 
+import mido
+import usb.core
+
 from . import pad_text, push2_midi, renderer
 from .midi_listener import MidiStateListener
+from .monitor import MonitorState
 from .protocol import DisplayModel
 from .usb_display import Push2Display, Push2DisplayNotFound
 
@@ -166,6 +170,40 @@ def _run_demo(args) -> int:
     return 0
 
 
+def _run_monitor(args) -> int:
+    """Show live Push 2 MIDI activity on the display (works alongside FL).
+
+    Resilient: waits for the Push and reconnects if it's unplugged, so it can
+    run unattended (e.g. as a login launchd agent).
+    """
+    state = MonitorState()
+    interval = 1.0 / max(1, args.fps)
+    retry = 3.0
+    while True:
+        in_port = None
+        try:
+            in_port = mido.open_input(args.pad_port)
+            with Push2Display() as display:
+                print(f"Connected. Monitoring '{args.pad_port}'.")
+                while True:
+                    start = time.perf_counter()
+                    for msg in in_port.iter_pending():
+                        state.update(msg)
+                    display.send_frame(renderer.render_monitor(state))
+                    elapsed = time.perf_counter() - start
+                    if elapsed < interval:
+                        time.sleep(interval - elapsed)
+        except KeyboardInterrupt:
+            print("\nStopping.")
+            return 0
+        except (Push2DisplayNotFound, OSError, IOError, usb.core.USBError) as exc:
+            print(f"Waiting for Push 2 ({exc.__class__.__name__}); retry in {retry:.0f}s")
+            time.sleep(retry)
+        finally:
+            if in_port is not None:
+                in_port.close()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Push 2 display daemon for FL Studio")
     parser.add_argument(
@@ -202,6 +240,12 @@ def main() -> int:
         help="Use the larger 5x7 font for --text (default is compact 3x5).",
     )
     parser.add_argument(
+        "--monitor",
+        action="store_true",
+        help="Show live Push 2 MIDI activity (pads/buttons/encoders) on the "
+        "display. Works alongside FL Studio — no IAC/companion setup needed.",
+    )
+    parser.add_argument(
         "--demo",
         action="store_true",
         help="Drive the display with an animated synthetic state (no FL "
@@ -220,6 +264,9 @@ def main() -> int:
         "(e.g. /tmp/push2_demo). Frame number is appended.",
     )
     args = parser.parse_args()
+
+    if args.monitor:
+        return _run_monitor(args)
 
     if args.demo:
         return _run_demo(args)

@@ -64,6 +64,42 @@ def draw(model: DisplayModel) -> Image.Image:
     return img
 
 
+def draw_monitor(state) -> Image.Image:
+    """Live MIDI activity view: last note, velocity, encoders, last button."""
+    img = Image.new("RGB", (LINE_WIDTH, HEIGHT), (0, 0, 0))
+    d = ImageDraw.Draw(img)
+
+    d.text((8, 4), "PUSH 2  -  LIVE MIDI MONITOR", fill=(120, 180, 255), font=_FONT)
+    d.text((760, 4), f"evt {state.events}", fill=(90, 90, 90), font=_FONT)
+
+    # Last note + a big velocity bar
+    rc = state.pad_rc()
+    where = f"PAD r{rc[0]} c{rc[1]}" if rc else "-"
+    note_txt = "-" if state.last_note is None else str(state.last_note)
+    d.text((8, 30), f"NOTE {note_txt}   {where}", fill=(255, 255, 255), font=_FONT)
+    d.text((8, 48), f"VEL  {state.last_vel}", fill=(0, 220, 120), font=_FONT)
+    bar_w = int((LINE_WIDTH - 320) * (state.last_vel / 127.0))
+    color = (0, 220, 120) if state.note_on else (60, 110, 80)
+    d.rectangle([90, 50, 90 + bar_w, 60], fill=color)
+
+    cc_txt = "-" if state.last_cc is None else f"CC {state.last_cc} = {state.last_cc_val}"
+    d.text((8, 70), f"LAST BUTTON  {cc_txt}", fill=(200, 200, 120), font=_FONT)
+
+    # 8 encoder bars along the bottom
+    col_w = LINE_WIDTH // 8
+    for i, val in enumerate(state.encoders):
+        x = i * col_w + 8
+        h = int(40 * (val / 127.0))
+        d.rectangle([x, HEIGHT - 8 - h, x + col_w - 20, HEIGHT - 8],
+                    fill=(80, 160, 255))
+        d.text((x, HEIGHT - 56), f"E{i + 1}", fill=(120, 120, 120), font=_FONT)
+    return img
+
+
+def render_monitor(state) -> bytes:
+    return to_framebuffer(draw_monitor(state))
+
+
 def to_framebuffer(img: Image.Image) -> bytes:
     """Convert a 960x160 RGB image to a scrambled 327,680-byte wire frame."""
     if img.size != (LINE_WIDTH, HEIGHT):

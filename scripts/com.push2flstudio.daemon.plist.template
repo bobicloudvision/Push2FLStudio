@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchAgent template for the Push 2 display daemon.
+  __PYTHON__ and __MODULE_DIR__ are filled in by scripts/install-agent.sh.
+  Runs at login and is kept alive; logs to /tmp.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.push2flstudio.daemon</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PYTHON__</string>
+        <string>-m</string>
+        <string>display_daemon</string>
+        <string>--monitor</string>
+        <string>--fps</string>
+        <string>20</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__MODULE_DIR__</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/push2flstudio.daemon.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/push2flstudio.daemon.err</string>
+</dict>
+</plist>

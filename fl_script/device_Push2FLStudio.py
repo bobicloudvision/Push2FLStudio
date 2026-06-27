@@ -23,6 +23,14 @@ import push2_map as p2
 import protocol as proto
 
 NUM_TRACKS = 8
+MAX_CHANNELS = 64  # 8x8 pad grid
+
+# Push 2 sysex prefix for device commands (Set/Reapply palette etc.).
+_PUSH_PREFIX = [0xF0, 0x00, 0x21, 0x1D, 0x01, 0x01]
+
+# We remap palette indices 1..64 to the exact Channel Rack channel colors.
+# Index 0 = off; 122 = white (pressed); 124..127 used by transport — untouched.
+_CH_PALETTE_BASE = 1
 
 _last = {
     "playing": None,
@@ -33,18 +41,58 @@ _last = {
     "levels": [None] * NUM_TRACKS,
 }
 
+_chan_colors = [None] * MAX_CHANNELS   # cache: last channel color synced
+_pad_cache = {}                        # note -> last color sent
+_btn_cache = {}                        # cc -> last value sent
+
 
 # --------------------------------------------------------------------------
 # Low-level LED helpers
 # --------------------------------------------------------------------------
 def _pad_led(note, color):
-    # Note On, channel 1: velocity = palette color index.
+    # Note On, channel 1: velocity = palette color index. Cached.
+    if _pad_cache.get(note) == color:
+        return
+    _pad_cache[note] = color
     device.midiOutMsg(0x90 + (note << 8) + (color << 16))
 
 
 def _btn_led(cc, value):
     # CC, channel 1: value = palette index (RGB buttons) or brightness (white).
+    if _btn_cache.get(cc) == value:
+        return
+    _btn_cache[cc] = value
     device.midiOutMsg(0xB0 + (cc << 8) + (value << 16))
+
+
+def _set_palette(index, r, g, b):
+    """Define Push palette entry `index` as 8-bit r/g/b (white left at 0)."""
+    msg = _PUSH_PREFIX + [0x03, index & 0x7F,
+                          r & 0x7F, (r >> 7) & 1,
+                          g & 0x7F, (g >> 7) & 1,
+                          b & 0x7F, (b >> 7) & 1,
+                          0x00, 0x00, 0xF7]
+    device.midiOutSysex(bytes(msg))
+
+
+def _reapply_palette():
+    device.midiOutSysex(bytes(_PUSH_PREFIX + [0x05, 0xF7]))
+
+
+def _sync_palette():
+    """Push the current channel colors into palette slots 1..N. Reapply if any
+    changed so already-lit pads recolor without resending notes."""
+    count = channels.channelCount()
+    changed = False
+    for i in range(min(count, MAX_CHANNELS)):
+        c = channels.getChannelColor(i)
+        if _chan_colors[i] != c:
+            _chan_colors[i] = c
+            _set_palette(_CH_PALETTE_BASE + i,
+                         (c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF)
+            changed = True
+    if changed:
+        _reapply_palette()
 
 
 def _pad_to_channel(note):
@@ -66,13 +114,19 @@ def _mirror(sysex_bytes):
 # --------------------------------------------------------------------------
 # Pad LEDs
 # --------------------------------------------------------------------------
+def _channel_pad_color(idx):
+    """Palette index showing channel `idx`'s own Channel Rack color."""
+    return _CH_PALETTE_BASE + idx
+
+
 def _refresh_pads():
-    """Light pads that map to an existing channel; others off."""
+    """Light each pad in its channel's color; pads without a channel off."""
+    _sync_palette()
     count = channels.channelCount()
     for note in range(p2.PAD_NOTE_MIN, p2.PAD_NOTE_MAX + 1):
         idx = _pad_to_channel(note)
-        if 0 <= idx < count:
-            _pad_led(note, p2.PAD_BLUE)
+        if 0 <= idx < count and idx < MAX_CHANNELS:
+            _pad_led(note, _channel_pad_color(idx))
         else:
             _pad_led(note, p2.PAD_OFF)
 
@@ -149,7 +203,7 @@ def _handle_pad(event):
     pressed = (event.status & 0xF0) == 0x90 and event.data2 > 0
     # Play the channel (note 60 = middle C) at the pad's velocity.
     channels.midiNoteOn(idx, 60, event.data2 if pressed else 0)
-    _pad_led(note, p2.PAD_WHITE if pressed else p2.PAD_BLUE)
+    _pad_led(note, p2.PAD_WHITE if pressed else _channel_pad_color(idx))
 
 
 def _handle_button(cc):

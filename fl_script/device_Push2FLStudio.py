@@ -52,10 +52,11 @@ _btn_cache = {}                        # cc -> last value sent
 
 # Pad modes: "drum" (pad -> channel) or "note" (chromatic piano-roll grid).
 _mode = "drum"
-_root = 48                             # bottom-left pad note in note mode (C3)
-NOTE_ROW_OFFSET = 5                    # semitones per row up (perfect fourth)
-_scale = 0                             # index into scales.SCALES (0 = Major)
-_scale_picker = False                  # True while the Scale button is held
+_root = 48                             # root note (C3); octave buttons shift it
+IN_KEY_ROW_STEP = 3                    # scale-steps each row goes up (~a fourth)
+_scale = 0                             # ACTIVE scale (applied on Load)
+_scale_cursor = 0                      # browsing cursor in the scale screen
+_scale_mode = False                    # scale screen open (Scale button toggles)
 
 
 # --------------------------------------------------------------------------
@@ -131,48 +132,38 @@ def _channel_pad_color(idx):
     return _CH_PALETTE_BASE + idx
 
 
-def _note_for_pad(note):
-    """Note-mode: pad MIDI note -> played note (isomorphic, fourths layout)."""
+def _pad_scale_index(note):
+    """Note-mode: pad -> index into the in-key note run (isomorphic grid)."""
     idx = note - p2.PAD_NOTE_MIN
     row, col = idx // p2.PAD_COLS, idx % p2.PAD_COLS
-    return _root + row * NOTE_ROW_OFFSET + col
+    return row * IN_KEY_ROW_STEP + col
 
 
-def _note_pad_color(played):
-    """Resting color for a note pad: root highlighted, in-key lit, else off."""
-    degree = (played - _root) % 12
-    if degree == 0:
-        return p2.PAD_BLUE            # root note
-    if scales.in_scale(degree, _scale):
-        sel = channels.selectedChannel()
-        if 0 <= sel < MAX_CHANNELS:
-            return _channel_pad_color(sel)
-        return p2.PAD_GREEN
-    return p2.PAD_OFF                  # out of key
+def _scale_note(scale_index):
+    """The MIDI note for the Nth in-key step above the root."""
+    s = scales.SCALES[_scale]
+    n = len(s)
+    return _root + (scale_index // n) * 12 + s[scale_index % n]
 
 
-def _refresh_scale_picker():
-    """While the Scale button is held: one pad per scale, current = white."""
-    for note in range(p2.PAD_NOTE_MIN, p2.PAD_NOTE_MAX + 1):
-        i = note - p2.PAD_NOTE_MIN
-        if i == _scale:
-            _pad_led(note, p2.PAD_WHITE)
-        elif i < scales.COUNT:
-            _pad_led(note, p2.PAD_BLUE)
-        else:
-            _pad_led(note, p2.PAD_OFF)
+def _note_pad_color(scale_index):
+    """In-key pad color: root/octave highlighted, other in-key = channel color."""
+    n = len(scales.SCALES[_scale])
+    if scale_index % n == 0:
+        return p2.PAD_BLUE            # root / octave
+    sel = channels.selectedChannel()
+    if 0 <= sel < MAX_CHANNELS:
+        return _channel_pad_color(sel)
+    return p2.PAD_GREEN
 
 
 def _refresh_pads():
     """Light the pads for the current mode."""
     _sync_palette()
-    if _scale_picker:
-        _refresh_scale_picker()
-        return
     if _mode == "note":
         for note in range(p2.PAD_NOTE_MIN, p2.PAD_NOTE_MAX + 1):
-            played = _note_for_pad(note)
-            _pad_led(note, _note_pad_color(played) if played <= 127 else p2.PAD_OFF)
+            si = _pad_scale_index(note)
+            _pad_led(note, _note_pad_color(si) if _scale_note(si) <= 127 else p2.PAD_OFF)
         return
     count = channels.channelCount()
     for note in range(p2.PAD_NOTE_MIN, p2.PAD_NOTE_MAX + 1):
@@ -242,51 +233,55 @@ def OnMidiMsg(event):
             event.handled = True
         return
 
-    # Buttons
-    if status == 0xB0:
-        cc, val = event.data1, event.data2
-        if cc == p2.BTN_SCALE:
-            _handle_scale_hold(val == 127)   # press opens, release closes
-            event.handled = True
-        elif val == 127:
-            _handle_button(cc)
-            event.handled = True
+    # Buttons (press only, value 127)
+    if status == 0xB0 and event.data2 == 127:
+        _handle_button(event.data1)
+        event.handled = True
 
 
-def _handle_scale_hold(active):
-    global _scale_picker
-    _scale_picker = active
-    _pad_cache.clear()                        # force full repaint
+def _toggle_scale_mode():
+    global _scale_mode, _scale_cursor
+    _scale_mode = not _scale_mode
+    if _scale_mode:
+        _scale_cursor = _scale           # start browsing from the active scale
+    _btn_led(p2.BTN_SCALE, 127 if _scale_mode else WHITE_BTN_GLOW)
+    _btn_led(p2.BTN_LOAD, p2.PAD_WHITE if _scale_mode else WHITE_BTN_GLOW)
+    _mirror_scale()
+
+
+def _move_cursor(cc):
+    global _scale_cursor
+    delta = {p2.BTN_LEFT: -1, p2.BTN_RIGHT: 1,
+             p2.BTN_UP: -p2.SCALE_GRID_COLS,
+             p2.BTN_DOWN: p2.SCALE_GRID_COLS}[cc]
+    _scale_cursor = max(0, min(scales.COUNT - 1, _scale_cursor + delta))
+    _mirror_scale()
+
+
+def _load_scale():
+    """Apply the cursor scale as the active scale and repaint note pads."""
+    global _scale
+    _scale = _scale_cursor
     _refresh_pads()
-    _btn_led(p2.BTN_SCALE, 127 if active else WHITE_BTN_GLOW)
     _mirror_scale()
 
 
 def _mirror_scale():
-    _mirror(proto.scale(_scale_picker, _scale, _root % 12))
+    _mirror(proto.scale(_scale_mode, _scale_cursor, _root % 12))
 
 
 def _handle_pad(event):
-    global _scale
     pressed = (event.status & 0xF0) == 0x90 and event.data2 > 0
     note = event.data1
 
-    if _scale_picker:
-        if pressed:
-            i = note - p2.PAD_NOTE_MIN
-            if 0 <= i < scales.COUNT:
-                _scale = i
-                _refresh_scale_picker()
-                _mirror_scale()
-        return
-
     if _mode == "note":
-        played = _note_for_pad(note)
+        si = _pad_scale_index(note)
+        played = _scale_note(si)
         if played > 127:
             return
         sel = channels.selectedChannel()
         channels.midiNoteOn(sel, played, event.data2 if pressed else 0)
-        _pad_led(note, p2.PAD_WHITE if pressed else _note_pad_color(played))
+        _pad_led(note, p2.PAD_WHITE if pressed else _note_pad_color(si))
         return
 
     idx = _pad_to_channel(note)
@@ -299,6 +294,18 @@ def _handle_pad(event):
 
 def _handle_button(cc):
     global _mode, _root
+    # Scale screen: toggle, navigate, load.
+    if cc == p2.BTN_SCALE:
+        _toggle_scale_mode()
+        return
+    if _scale_mode:
+        if cc in (p2.BTN_UP, p2.BTN_DOWN, p2.BTN_LEFT, p2.BTN_RIGHT):
+            _move_cursor(cc)
+            return
+        if cc == p2.BTN_LOAD:
+            _load_scale()
+            return
+
     if cc == p2.BTN_PLAY:
         transport.start()
     elif cc == p2.BTN_STOP:

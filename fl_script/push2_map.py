@@ -51,7 +51,13 @@ BTN_PLAY = 85
 BTN_RECORD = 86
 BTN_STOP = 29
 BTN_NOTE = 50          # toggle drum <-> note (piano) mode
-BTN_SCALE = 58         # hold to open the scale picker
+BTN_SCALE = 58         # toggle the scale-select screen
+BTN_LOAD = 20          # "Lower Row 1" display button = load selected scale
+BTN_UP = 46
+BTN_DOWN = 47
+BTN_LEFT = 44
+BTN_RIGHT = 45
+SCALE_GRID_COLS = 4    # must match the display's scale-menu grid width
 BTN_OCTAVE_UP = 55
 BTN_OCTAVE_DOWN = 54
 BTN_METRONOME = 9

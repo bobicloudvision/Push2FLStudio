@@ -40,33 +40,46 @@ SCALE_NAMES = (
 _PITCH_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 
 
-def draw_scale_menu(model: DisplayModel) -> Image.Image:
-    """Scale picker overlay: a grid of scale names, current highlighted."""
+def draw_scale_menu(scale_index: int, scale_root: int = 0,
+                    loaded_index=None) -> Image.Image:
+    """Scale screen: a grid of all scale names. Cursor = blue box; the LOADed
+    scale = green. A soft LOAD hint sits over the lower-left display button."""
     img = Image.new("RGB", (LINE_WIDTH, HEIGHT), (0, 0, 0))
     d = ImageDraw.Draw(img)
-    root = _PITCH_NAMES[model.scale_root % 12]
-    cur = SCALE_NAMES[model.scale_index] if model.scale_index < len(SCALE_NAMES) else "?"
-    d.text((8, 4), f"SCALE   {root} {cur}", fill=(120, 200, 255), font=_FONT)
+    root = _PITCH_NAMES[scale_root % 12]
+    cur = SCALE_NAMES[scale_index] if scale_index < len(SCALE_NAMES) else "?"
+    header = f"SCALE   {root} {cur}"
+    if loaded_index is not None:
+        header += f"      loaded: {SCALE_NAMES[loaded_index]}"
+    d.text((8, 4), header, fill=(120, 200, 255), font=_FONT)
+    d.text((8, HEIGHT - 12), "[ lower-left btn = LOAD ]", fill=(90, 120, 90), font=_FONT)
 
-    cols, rows = 4, 6   # 24 cells for 23 scales
+    cols = 4   # 4 x 6 grid = 24 cells for 23 scales
     cell_w = LINE_WIDTH // cols
-    top, cell_h = 26, 22
+    top, cell_h = 24, 20
     for i, name in enumerate(SCALE_NAMES):
         cx = (i % cols) * cell_w + 8
         cy = top + (i // cols) * cell_h
-        if i == model.scale_index:
-            d.rectangle([cx - 4, cy - 2, cx + cell_w - 8, cy + 14],
+        if i == scale_index:
+            d.rectangle([cx - 4, cy - 2, cx + cell_w - 8, cy + 13],
                         fill=(40, 90, 160))
             color = (255, 255, 255)
+        elif i == loaded_index:
+            color = (0, 220, 120)
         else:
             color = (170, 170, 170)
         d.text((cx, cy), name[:14], fill=color, font=_FONT)
     return img
 
 
+def render_scale_menu(scale_index: int, scale_root: int = 0,
+                      loaded_index=None) -> bytes:
+    return to_framebuffer(draw_scale_menu(scale_index, scale_root, loaded_index))
+
+
 def draw(model: DisplayModel) -> Image.Image:
     if model.scale_active:
-        return draw_scale_menu(model)
+        return draw_scale_menu(model.scale_index, model.scale_root)
     """Build the 960x160 RGB image for the current state.
 
     Intentionally minimal — this is the surface you'll grow into the real UI

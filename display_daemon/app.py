@@ -193,7 +193,12 @@ def _run_monitor(args) -> int:
                     start = time.perf_counter()
                     for msg in in_port.iter_pending():
                         state.update(msg)
-                    display.send_frame(renderer.render_monitor(state))
+                    if state.scale_menu_open:
+                        frame = renderer.render_scale_menu(
+                            state.scale_index, loaded_index=state.loaded_scale)
+                    else:
+                        frame = renderer.render_monitor(state)
+                    display.send_frame(frame)
                     elapsed = time.perf_counter() - start
                     if elapsed < interval:
                         time.sleep(interval - elapsed)

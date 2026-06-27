@@ -11,7 +11,7 @@ import argparse
 import math
 import time
 
-from . import push2_midi, renderer
+from . import pad_text, push2_midi, renderer
 from .midi_listener import MidiStateListener
 from .protocol import DisplayModel
 from .usb_display import Push2Display, Push2DisplayNotFound
@@ -112,6 +112,13 @@ def _run_demo(args) -> int:
         print(f"Wrote {n} demo PNG frame(s). Pipeline OK.")
         return 0
 
+    # Optional scrolling-text marquee on the pads instead of the color fill.
+    marquee = (
+        pad_text.PadText(args.text, speed=args.text_speed,
+                         color=args.text_color, big=args.text_big)
+        if args.text else None
+    )
+
     # Pads are a separate MIDI interface — open them if present.
     pads = None
     held: set = set()
@@ -138,7 +145,10 @@ def _run_demo(args) -> int:
                         pads.set_pad(note, push2_midi.WHITE)
                     else:
                         held.discard(note)
-                _animate_pads(pads, frame, held)
+                if marquee is not None:
+                    marquee.render(pads, frame, held)
+                else:
+                    _animate_pads(pads, frame, held)
                 _animate_buttons(pads, frame)
             frame += 1
             if args.demo_frames and frame >= args.demo_frames:
@@ -168,6 +178,28 @@ def main() -> int:
         "--pad-port",
         default="Ableton Push 2 Live Port",
         help="Push 2 MIDI port for pad LEDs/input in --demo mode.",
+    )
+    parser.add_argument(
+        "--text",
+        help="In --demo mode, scroll this text across the pads instead of the "
+        "color-fill animation.",
+    )
+    parser.add_argument(
+        "--text-speed",
+        type=int,
+        default=3,
+        help="Frames per column step for --text (smaller = faster scroll).",
+    )
+    parser.add_argument(
+        "--text-color",
+        type=int,
+        default=push2_midi.WHITE,
+        help="Palette index for --text (single color). Default: white.",
+    )
+    parser.add_argument(
+        "--text-big",
+        action="store_true",
+        help="Use the larger 5x7 font for --text (default is compact 3x5).",
     )
     parser.add_argument(
         "--demo",

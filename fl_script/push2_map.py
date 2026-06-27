@@ -1,3 +1,7 @@
+# Push2FLStudio  —  Copyright (c) 2026 Bozhidar Slaveykov.
+# Licensed under the project's Attribution-Required License (see LICENSE).
+# Any use or modification must credit the author: BOZHIDAR SLAVEYKOV.
+
 """Push 2 MIDI control map (default / "Live" mode).
 
 Values from Ableton/push-interface — AbletonPush2MIDIDisplayInterface.asc.
@@ -46,6 +50,10 @@ BTN_BELOW_DISPLAY_CC = list(range(20, 28))    # 20..27
 BTN_PLAY = 85
 BTN_RECORD = 86
 BTN_STOP = 29
+BTN_NOTE = 50          # toggle drum <-> note (piano) mode
+BTN_SCALE = 58         # hold to open the scale picker
+BTN_OCTAVE_UP = 55
+BTN_OCTAVE_DOWN = 54
 BTN_METRONOME = 9
 BTN_TAP_TEMPO = 3
 BTN_NEW = 87

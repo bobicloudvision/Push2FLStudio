@@ -1,3 +1,7 @@
+# Push2FLStudio  —  Copyright (c) 2026 Bozhidar Slaveykov.
+# Licensed under the project's Attribution-Required License (see LICENSE).
+# Any use or modification must credit the author: BOZHIDAR SLAVEYKOV.
+
 """State-mirroring SysEx protocol — DISPLAY DAEMON side (decoder).
 
 The FL Studio script can only emit MIDI, so it mirrors its state to the
@@ -30,6 +34,7 @@ MSG_SELECTED_TRACK = 0x02  # [index]
 MSG_TRACK_NAME = 0x10      # [index, *ascii]
 MSG_TRACK_LEVEL = 0x11     # [index, value 0..127]
 MSG_PARAM = 0x20           # [encoder, value 0..127, *ascii name]
+MSG_SCALE = 0x30           # [active, scale_index, root_pc]
 MSG_CLEAR = 0x7F           # []  -> reset display model
 
 
@@ -48,6 +53,9 @@ class DisplayModel:
     track_names: list[str] = field(default_factory=lambda: [""] * 8)
     track_levels: list[int] = field(default_factory=lambda: [0] * 8)
     params: list[tuple[str, int]] = field(default_factory=lambda: [("", 0)] * 8)
+    scale_active: bool = False
+    scale_index: int = 0
+    scale_root: int = 0
 
 
 def _decode_ascii(data) -> str:
@@ -81,5 +89,9 @@ def apply_sysex(model: DisplayModel, payload: list[int]) -> None:
         idx = body[0]
         if 0 <= idx < len(model.params):
             model.params[idx] = (_decode_ascii(body[2:]), body[1])
+    elif msg_type == MSG_SCALE and len(body) >= 3:
+        model.scale_active = bool(body[0])
+        model.scale_index = body[1]
+        model.scale_root = body[2]
     elif msg_type == MSG_CLEAR:
         model.__init__()  # type: ignore[misc]  # reset to defaults

@@ -1,3 +1,7 @@
+# Push2FLStudio  —  Copyright (c) 2026 Bozhidar Slaveykov.
+# Licensed under the project's Attribution-Required License (see LICENSE).
+# Any use or modification must credit the author: BOZHIDAR SLAVEYKOV.
+
 """Display daemon entry point.
 
 Owns the Push 2 display USB endpoint, listens to the virtual MIDI port for

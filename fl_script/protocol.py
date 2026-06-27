@@ -1,3 +1,7 @@
+# Push2FLStudio  —  Copyright (c) 2026 Bozhidar Slaveykov.
+# Licensed under the project's Attribution-Required License (see LICENSE).
+# Any use or modification must credit the author: BOZHIDAR SLAVEYKOV.
+
 """State-mirroring SysEx protocol — FL STUDIO side (encoder).
 
 MUST stay byte-for-byte compatible with
@@ -17,6 +21,7 @@ MSG_SELECTED_TRACK = 0x02
 MSG_TRACK_NAME = 0x10
 MSG_TRACK_LEVEL = 0x11
 MSG_PARAM = 0x20
+MSG_SCALE = 0x30
 MSG_CLEAR = 0x7F
 
 
@@ -50,6 +55,11 @@ def track_level(index, value):
 
 def param(index, value, name):
     return _wrap([MSG_PARAM, index & 0x7F, value & 0x7F] + _ascii7(name[:10]))
+
+
+def scale(active, index, root_pc):
+    """Scale picker state: active flag, scale index, root pitch class (0..11)."""
+    return _wrap([MSG_SCALE, 1 if active else 0, index & 0x7F, root_pc & 0x7F])
 
 
 def clear():

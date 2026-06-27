@@ -1,3 +1,7 @@
+# Push2FLStudio  —  Copyright (c) 2026 Bozhidar Slaveykov.
+# Licensed under the project's Attribution-Required License (see LICENSE).
+# Any use or modification must credit the author: BOZHIDAR SLAVEYKOV.
+
 """Render a DisplayModel into a scrambled Push 2 framebuffer.
 
 Drawing is done with Pillow into a 960x160 RGB image, then converted to the
@@ -25,8 +29,44 @@ except ImportError:  # pragma: no cover - optional fast path
 
 _FONT = ImageFont.load_default()
 
+# Same 23 scales FL ships, for the scale-picker overlay.
+SCALE_NAMES = (
+    "Major", "Harmonic minor", "Melodic minor", "Whole tone", "Diminished",
+    "Major penta", "Minor penta", "Jap in sen", "Major bebop", "Dominant bebop",
+    "Blues", "Arabic", "Enigmatic", "Neapolitan", "Neap. minor",
+    "Hungarian minor", "Dorian", "Phrygian", "Lydian", "Mixolydian",
+    "Aeolian", "Locrian", "Chromatic",
+)
+_PITCH_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+
+
+def draw_scale_menu(model: DisplayModel) -> Image.Image:
+    """Scale picker overlay: a grid of scale names, current highlighted."""
+    img = Image.new("RGB", (LINE_WIDTH, HEIGHT), (0, 0, 0))
+    d = ImageDraw.Draw(img)
+    root = _PITCH_NAMES[model.scale_root % 12]
+    cur = SCALE_NAMES[model.scale_index] if model.scale_index < len(SCALE_NAMES) else "?"
+    d.text((8, 4), f"SCALE   {root} {cur}", fill=(120, 200, 255), font=_FONT)
+
+    cols, rows = 4, 6   # 24 cells for 23 scales
+    cell_w = LINE_WIDTH // cols
+    top, cell_h = 26, 22
+    for i, name in enumerate(SCALE_NAMES):
+        cx = (i % cols) * cell_w + 8
+        cy = top + (i // cols) * cell_h
+        if i == model.scale_index:
+            d.rectangle([cx - 4, cy - 2, cx + cell_w - 8, cy + 14],
+                        fill=(40, 90, 160))
+            color = (255, 255, 255)
+        else:
+            color = (170, 170, 170)
+        d.text((cx, cy), name[:14], fill=color, font=_FONT)
+    return img
+
 
 def draw(model: DisplayModel) -> Image.Image:
+    if model.scale_active:
+        return draw_scale_menu(model)
     """Build the 960x160 RGB image for the current state.
 
     Intentionally minimal — this is the surface you'll grow into the real UI

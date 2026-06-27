@@ -1,3 +1,7 @@
+# Push2FLStudio  —  Copyright (c) 2026 Bozhidar Slaveykov.
+# Licensed under the project's Attribution-Required License (see LICENSE).
+# Any use or modification must credit the author: BOZHIDAR SLAVEYKOV.
+
 """Live MIDI monitor state for the Push 2 display.
 
 Listens to what you play on the Push (pads, buttons, encoders) and keeps a

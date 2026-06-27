@@ -1,3 +1,7 @@
+# Push2FLStudio  —  Copyright (c) 2026 Bozhidar Slaveykov.
+# Licensed under the project's Attribution-Required License (see LICENSE).
+# Any use or modification must credit the author: BOZHIDAR SLAVEYKOV.
+
 """Scrolling text marquee on the Push 2's 8x8 pad grid.
 
 Two fonts: a compact 3x5 (default, "small") and a larger 5x7. The glyph is

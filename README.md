@@ -67,3 +67,12 @@ stubbed with `TODO`s and meant to be grown against real hardware.
 
 Ableton Push 2 MIDI & Display Interface manual:
 https://github.com/Ableton/push-interface
+
+## License
+
+Copyright (c) 2026 **Bozhidar Slaveykov**. Released under an
+**Attribution-Required License** — see [LICENSE](LICENSE).
+
+You may use, modify, and distribute these scripts **only if** you give clear,
+visible credit to the author, **BOZHIDAR SLAVEYKOV**. Using them without that
+attribution is not permitted.

@@ -1,3 +1,7 @@
+# Push2FLStudio  —  Copyright (c) 2026 Bozhidar Slaveykov.
+# Licensed under the project's Attribution-Required License (see LICENSE).
+# Any use or modification must credit the author: BOZHIDAR SLAVEYKOV.
+
 """Listen on the virtual MIDI port for state SysEx from the FL Studio script.
 
 macOS: enable an IAC Driver bus in Audio MIDI Setup.

@@ -11,6 +11,10 @@
 #   * Input:  the virtual bus (or "(none)" — this script doesn't read input)
 #   * Output: the virtual bus the display daemon listens on
 #   * `receiveFrom` above links it to the main script for device.dispatch().
+# Push2FLStudio  —  Copyright (c) 2026 Bozhidar Slaveykov.
+# Licensed under the project's Attribution-Required License (see LICENSE).
+# Any use or modification must credit the author: BOZHIDAR SLAVEYKOV.
+#
 
 import device
 

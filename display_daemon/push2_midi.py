@@ -1,3 +1,7 @@
+# Push2FLStudio  —  Copyright (c) 2026 Bozhidar Slaveykov.
+# Licensed under the project's Attribution-Required License (see LICENSE).
+# Any use or modification must credit the author: BOZHIDAR SLAVEYKOV.
+
 """Direct Push 2 MIDI access for the demo (pads + LEDs).
 
 Separate from the display USB path and from FL Studio: this opens the Push 2's

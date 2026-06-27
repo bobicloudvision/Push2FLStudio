@@ -1,3 +1,7 @@
+# Push2FLStudio  —  Copyright (c) 2026 Bozhidar Slaveykov.
+# Licensed under the project's Attribution-Required License (see LICENSE).
+# Any use or modification must credit the author: BOZHIDAR SLAVEYKOV.
+
 """Push 2 color display over USB bulk transfer.
 
 Spec: Ableton/push-interface (AbletonPush2MIDIDisplayInterface.asc).

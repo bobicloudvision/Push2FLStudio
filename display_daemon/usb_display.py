@@ -67,7 +67,13 @@ class Push2Display:
                 dev.detach_kernel_driver(0)
         except (NotImplementedError, usb.core.USBError):
             pass  # not applicable on macOS / Windows
-        dev.set_configuration()
+        # Only configure if not already configured. On macOS, calling
+        # set_configuration() on an already-configured device fails with
+        # "No such device", so probe the active config first.
+        try:
+            dev.get_active_configuration()
+        except usb.core.USBError:
+            dev.set_configuration()
         self._device = dev
 
     def send_frame(self, frame: bytes | bytearray) -> None:

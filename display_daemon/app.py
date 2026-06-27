@@ -11,12 +11,55 @@ import argparse
 import math
 import time
 
-from . import renderer
+from . import push2_midi, renderer
 from .midi_listener import MidiStateListener
 from .protocol import DisplayModel
 from .usb_display import Push2Display, Push2DisplayNotFound
 
 FRAME_INTERVAL = 1.0 / 60.0
+
+# Vivid solid colors (Push 2 default palette indices) cycled one per fill.
+_COLORS = [127, 9, 124, 126, 37, 125, 49, 22]
+
+_FILL_FRAMES = 40    # frames to fill the whole grid (ease-in)
+_HOLD_FRAMES = 5     # hold the full grid before switching color
+_CYCLE_FRAMES = _FILL_FRAMES + _HOLD_FRAMES
+
+
+def _fill_order():
+    """Pad notes ordered diagonally from the bottom-left corner (flow-in)."""
+    order = []
+    for dist in range(push2_midi.PAD_ROWS + push2_midi.PAD_COLS - 1):
+        for row in range(push2_midi.PAD_ROWS):
+            col = dist - row
+            if 0 <= col < push2_midi.PAD_COLS:
+                order.append(push2_midi.pad_note(row, col))
+    return order
+
+
+_FILL_ORDER = _fill_order()  # 64 notes
+_TOTAL = len(_FILL_ORDER)
+
+
+def _animate_pads(pads, frame: int, held: set) -> None:
+    """Grow a single-color fill slowly from one corner; switch color per cycle.
+
+    1 pad lit -> 2 -> 3 ... ease-in until all 64 are lit (one color), hold,
+    then start over from one corner in the next color. Held pads stay white.
+    """
+    f = frame % _CYCLE_FRAMES
+    color = _COLORS[(frame // _CYCLE_FRAMES) % len(_COLORS)]
+
+    if f < _FILL_FRAMES:
+        progress = f / _FILL_FRAMES          # 0..1
+        lit = math.ceil(_TOTAL * progress * progress)  # slow start, accelerates
+    else:
+        lit = _TOTAL                          # fully lit, holding
+
+    for i, note in enumerate(_FILL_ORDER):
+        if note in held:
+            continue
+        pads.set_pad(note, color if i < lit else push2_midi.OFF)
 
 
 def _demo_model(model: DisplayModel, frame: int) -> None:
@@ -53,6 +96,18 @@ def _run_demo(args) -> int:
         print(f"Wrote {n} demo PNG frame(s). Pipeline OK.")
         return 0
 
+    # Pads are a separate MIDI interface — open them if present.
+    pads = None
+    held: set = set()
+    if push2_midi.Push2Pads.available():
+        pads = push2_midi.Push2Pads(args.pad_port)
+        try:
+            pads.open()
+            print(f"Pads active on '{args.pad_port}' — press them; they light white.")
+        except (OSError, IOError) as exc:
+            print(f"Could not open pad port ({exc}); display only.")
+            pads = None
+
     print("Push 2 connected — driving the real display (Ctrl-C to stop).")
     try:
         frame = 0
@@ -60,6 +115,14 @@ def _run_demo(args) -> int:
             start = time.perf_counter()
             _demo_model(model, frame)
             display.send_frame(renderer.render(model))
+            if pads is not None:
+                for note, pressed in pads.poll():
+                    if pressed:
+                        held.add(note)
+                        pads.set_pad(note, push2_midi.WHITE)
+                    else:
+                        held.discard(note)
+                _animate_pads(pads, frame, held)
             frame += 1
             if args.demo_frames and frame >= args.demo_frames:
                 print(f"Sent {frame} frames to the Push 2 display. OK.")
@@ -70,6 +133,8 @@ def _run_demo(args) -> int:
     except KeyboardInterrupt:
         print("\nStopping.")
     finally:
+        if pads is not None:
+            pads.close()
         display.close()
     return 0
 
@@ -82,6 +147,11 @@ def main() -> int:
         "Omit to list available ports and exit.",
     )
     parser.add_argument("--fps", type=int, default=60)
+    parser.add_argument(
+        "--pad-port",
+        default="Ableton Push 2 Live Port",
+        help="Push 2 MIDI port for pad LEDs/input in --demo mode.",
+    )
     parser.add_argument(
         "--demo",
         action="store_true",

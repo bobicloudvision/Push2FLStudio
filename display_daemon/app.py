@@ -41,6 +41,22 @@ _FILL_ORDER = _fill_order()  # 64 notes
 _TOTAL = len(_FILL_ORDER)
 
 
+def _cycle_color(frame: int) -> int:
+    """The solid color for the current fill cycle."""
+    return _COLORS[(frame // _CYCLE_FRAMES) % len(_COLORS)]
+
+
+def _animate_buttons(pads, frame: int) -> None:
+    """Light the buttons: RGB ones match the pad color, white ones breathe."""
+    color = _cycle_color(frame)
+    for cc in push2_midi.BUTTONS_RGB:
+        pads.set_button(cc, color)
+    # Gentle brightness breathing for the white buttons (no harsh blinking).
+    brightness = int(40 + 35 * math.sin(frame / 12.0))
+    for cc in push2_midi.BUTTONS_WHITE:
+        pads.set_button(cc, brightness)
+
+
 def _animate_pads(pads, frame: int, held: set) -> None:
     """Grow a single-color fill slowly from one corner; switch color per cycle.
 
@@ -48,7 +64,7 @@ def _animate_pads(pads, frame: int, held: set) -> None:
     then start over from one corner in the next color. Held pads stay white.
     """
     f = frame % _CYCLE_FRAMES
-    color = _COLORS[(frame // _CYCLE_FRAMES) % len(_COLORS)]
+    color = _cycle_color(frame)
 
     if f < _FILL_FRAMES:
         progress = f / _FILL_FRAMES          # 0..1
@@ -123,6 +139,7 @@ def _run_demo(args) -> int:
                     else:
                         held.discard(note)
                 _animate_pads(pads, frame, held)
+                _animate_buttons(pads, frame)
             frame += 1
             if args.demo_frames and frame >= args.demo_frames:
                 print(f"Sent {frame} frames to the Push 2 display. OK.")

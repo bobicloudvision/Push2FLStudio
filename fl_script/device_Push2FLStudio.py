@@ -18,10 +18,13 @@
 # Any use or modification must credit the author: BOZHIDAR SLAVEYKOV.
 #
 
+import time
+
 import transport
 import channels
 import mixer
 import device
+import general
 
 import push2_map as p2
 import protocol as proto
@@ -61,6 +64,11 @@ _root = 48                             # root note (C3); octave buttons shift it
 IN_KEY_ROW_STEP = 3                    # scale-steps each row goes up (~a fourth)
 _scale = 0                             # active scale (applied live as you browse)
 _scale_mode = False                    # scale screen open (Scale button toggles)
+
+# Note repeat: hold a pad to retrigger its note at _repeat_rate (beats).
+_repeat = False
+_repeat_rate = 0.25                    # 1/16 by default
+_held_repeat = {}                      # pad note -> {ch, played, vel, next}
 
 
 # --------------------------------------------------------------------------
@@ -293,6 +301,8 @@ def OnInit():
     _refresh_pads()
     _refresh_white_buttons()
     _refresh_mode_leds()
+    _refresh_repeat_leds()
+    _refresh_action_leds()
     _refresh_transport()
     _mirror(proto.clear())
 
@@ -306,6 +316,11 @@ def OnDeInit():
     _btn_led(p2.BTN_STOP, p2.PAD_OFF)
     for cc in p2.BUTTONS_WHITE:
         _btn_led(cc, p2.PAD_OFF)
+    for cc in p2.RATE_DIVISIONS:
+        _btn_led(cc, p2.PAD_OFF)
+    _btn_led(p2.BTN_MUTE, p2.PAD_OFF)
+    _btn_led(p2.BTN_SOLO, p2.PAD_OFF)
+    _stop_all_repeats()
     _clear_mix_buttons()
     _mirror(proto.clear())
 
@@ -372,30 +387,69 @@ def _mirror_scale():
     _mirror(proto.scale(_scale_mode, _scale, _root % 12))
 
 
-def _handle_pad(event):
-    pressed = (event.status & 0xF0) == 0x90 and event.data2 > 0
-    note = event.data1
-
+def _pad_target(note):
+    """For the current play mode: (channel, played_note, resting_color) or None."""
     if _mode == "note":
         si = _pad_scale_index(note)
         played = _scale_note(si)
         if played > 127:
-            return
-        sel = channels.selectedChannel()
-        channels.midiNoteOn(sel, played, event.data2 if pressed else 0)
-        _pad_led(note, p2.PAD_WHITE if pressed else _note_pad_color(si))
-        return
-
+            return None
+        return channels.selectedChannel(), played, _note_pad_color(si)
     idx = _pad_to_channel(note)
     if idx < 0 or idx >= channels.channelCount():
+        return None
+    return idx, 60, _channel_pad_color(idx)   # drum: play middle C on the channel
+
+
+def _handle_pad(event):
+    pressed = (event.status & 0xF0) == 0x90 and event.data2 > 0
+    note = event.data1
+    target = _pad_target(note)
+    if target is None:
         return
-    # Play the channel (note 60 = middle C) at the pad's velocity.
-    channels.midiNoteOn(idx, 60, event.data2 if pressed else 0)
-    _pad_led(note, p2.PAD_WHITE if pressed else _channel_pad_color(idx))
+    ch, played, resting = target
+
+    if pressed:
+        channels.midiNoteOn(ch, played, event.data2)
+        if _repeat:
+            _held_repeat[note] = {"ch": ch, "played": played, "vel": event.data2,
+                                  "next": time.time() + _repeat_interval()}
+        _pad_led(note, p2.PAD_WHITE)
+    else:
+        h = _held_repeat.pop(note, None)
+        channels.midiNoteOn(ch, played, 0)
+        _pad_led(note, resting)
 
 
 def _handle_button(cc):
-    global _mode, _prev_play_mode
+    global _mode, _prev_play_mode, _repeat, _repeat_rate
+    if cc == p2.BTN_REPEAT:
+        _repeat = not _repeat
+        if not _repeat:
+            _stop_all_repeats()
+        _refresh_repeat_leds()
+        return
+    if cc in p2.RATE_DIVISIONS:
+        _repeat_rate = p2.RATE_DIVISIONS[cc]
+        _refresh_repeat_leds()
+        return
+    if cc == p2.BTN_MUTE:
+        _toggle_mute()
+        _refresh_action_leds()
+        return
+    if cc == p2.BTN_SOLO:
+        _toggle_solo()
+        _refresh_action_leds()
+        return
+    if cc == p2.BTN_UNDO:
+        general.undo()
+        return
+    if cc == p2.BTN_QUANTIZE:
+        channels.quickQuantize(channels.selectedChannel())
+        return
+    if cc == p2.BTN_DELETE:
+        _delete_selected_steps()
+        return
     if cc == p2.BTN_MIX:
         if _mode != "mix":
             _prev_play_mode = _mode
@@ -457,6 +511,90 @@ def _handle_button(cc):
     _refresh_transport()
 
 
+def _repeat_interval():
+    bpm = mixer.getCurrentTempo() / 1000.0
+    if bpm <= 0:
+        bpm = 120.0
+    return (60.0 / bpm) * _repeat_rate
+
+
+def _process_repeats():
+    """Retrigger held pads at the repeat rate (called from OnIdle)."""
+    if not _held_repeat:
+        return
+    now = time.time()
+    interval = _repeat_interval()
+    for note, h in list(_held_repeat.items()):
+        if now >= h["next"]:
+            channels.midiNoteOn(h["ch"], h["played"], 0)
+            channels.midiNoteOn(h["ch"], h["played"], h["vel"])
+            h["next"] = now + interval
+
+
+def _stop_all_repeats():
+    for note, h in list(_held_repeat.items()):
+        channels.midiNoteOn(h["ch"], h["played"], 0)
+    _held_repeat.clear()
+
+
+def _refresh_repeat_leds():
+    _btn_led(p2.BTN_REPEAT, 127 if _repeat else WHITE_BTN_GLOW)
+    for cc, rate in p2.RATE_DIVISIONS.items():
+        if not _repeat:
+            _btn_led(cc, p2.PAD_OFF)
+        elif abs(rate - _repeat_rate) < 1e-6:
+            _btn_led(cc, p2.PAD_GREEN)     # active rate
+        else:
+            _btn_led(cc, p2.PAD_BLUE)
+
+
+def _toggle_mute():
+    if _mode == "mix":
+        mixer.muteTrack(mixer.trackNumber())
+    else:
+        channels.muteChannel(channels.selectedChannel())
+
+
+def _toggle_solo():
+    if _mode == "mix":
+        mixer.soloTrack(mixer.trackNumber())
+    else:
+        channels.soloChannel(channels.selectedChannel())
+
+
+def _is_muted():
+    try:
+        if _mode == "mix":
+            return mixer.isTrackMuted(mixer.trackNumber())
+        return channels.isChannelMuted(channels.selectedChannel())
+    except Exception:
+        return False
+
+
+def _is_solo():
+    try:
+        if _mode == "mix":
+            return mixer.isTrackSolo(mixer.trackNumber())
+        return channels.isChannelSolo(channels.selectedChannel())
+    except Exception:
+        return False
+
+
+def _delete_selected_steps():
+    """Clear the selected channel's step grid (reversible with Undo)."""
+    ch = channels.selectedChannel()
+    for step in range(64):
+        try:
+            channels.setGridBit(ch, step, 0)
+        except Exception:
+            break
+
+
+def _refresh_action_leds():
+    _btn_led(p2.BTN_MUTE, p2.PAD_RED if _is_muted() else p2.PAD_OFF)
+    _btn_led(p2.BTN_SOLO, p2.PAD_BLUE if _is_solo() else p2.PAD_OFF)
+
+
 def _refresh_mode_leds():
     """Highlight the active mode's button."""
     _btn_led(p2.BTN_NOTE, 127 if _mode == "note" else WHITE_BTN_GLOW)
@@ -469,6 +607,7 @@ def _refresh_mode_leds():
 def OnRefresh(flags):
     _refresh_pads()
     _refresh_white_buttons()
+    _refresh_action_leds()
     _refresh_transport()
 
 
@@ -476,8 +615,16 @@ def OnUpdateBeatIndicator(value):
     pass
 
 
+_idle_count = 0
+
+
 def OnIdle():
+    global _idle_count
+    _process_repeats()
     if _mode == "mix":
         _refresh_mix_meters()           # live VU on the pads
         _mirror(proto.mix_active(True))  # re-assert so a late daemon syncs
+        _idle_count += 1
+        if _idle_count % 10 == 0:
+            _mirror_mix_meta()          # re-send names/colors periodically
         _mirror_mix_live()              # live faders/levels on the display

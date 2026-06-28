@@ -59,6 +59,25 @@ BTN_LEFT = 44
 BTN_RIGHT = 45
 BTN_PAGE_LEFT = 62     # root key down a semitone
 BTN_PAGE_RIGHT = 63    # root key up a semitone
+BTN_REPEAT = 56        # toggle note repeat
+BTN_MUTE = 60          # mute selected channel / mixer track
+BTN_SOLO = 61          # solo selected channel / mixer track
+BTN_UNDO = 119
+BTN_DELETE = 118       # clear selected channel's steps
+BTN_QUANTIZE = 116     # quick-quantize selected channel
+
+# Time-division buttons (above the pads) -> beats per repeat.
+# Triplets are 2/3 of the straight value. Listed slow -> fast.
+RATE_DIVISIONS = {
+    36: 1.0,         # 1/4
+    37: 1.0 * 2 / 3,  # 1/4 triplet
+    38: 0.5,         # 1/8
+    39: 0.5 * 2 / 3,  # 1/8 triplet
+    40: 0.25,        # 1/16
+    41: 0.25 * 2 / 3,  # 1/16 triplet
+    42: 0.125,       # 1/32
+    43: 0.125 * 2 / 3,  # 1/32 triplet
+}
 SCALE_GRID_COLS = 4    # must match the display's scale-menu grid width
 BTN_OCTAVE_UP = 55
 BTN_OCTAVE_DOWN = 54

@@ -72,9 +72,47 @@ def render_scale_menu(scale_index: int, scale_root: int = 0) -> bytes:
     return to_framebuffer(draw_scale_menu(scale_index, scale_root))
 
 
+def draw_mixer(model: DisplayModel) -> Image.Image:
+    """8 mixer channel strips: name, a colored level meter (live output) and a
+    white fader marker (volume setting), plus mute/solo state."""
+    img = Image.new("RGB", (LINE_WIDTH, HEIGHT), (0, 0, 0))
+    d = ImageDraw.Draw(img)
+    col_w = LINE_WIDTH // 8
+    top, bottom = 22, HEIGHT - 12
+    span = bottom - top
+    for i in range(8):
+        x = i * col_w
+        color = tuple(model.mix_colors[i])
+        name = (model.mix_names[i] or f"Ins {i + 1}")[:9]
+        d.text((x + 4, 3), name, fill=color, font=_FONT)
+
+        mx = x + col_w // 2
+        # meter background track
+        d.rectangle([mx - 10, top, mx + 10, bottom], outline=(40, 40, 40))
+        # live output level (peak), filled bottom-up in the track color
+        ph = int(span * model.mix_peak[i] / 127)
+        if ph > 0:
+            d.rectangle([mx - 10, bottom - ph, mx + 10, bottom], fill=color)
+        # fader (volume) marker: white line across the strip
+        fy = bottom - int(span * model.mix_vol[i] / 127)
+        d.rectangle([mx - 14, fy - 1, mx + 14, fy + 1], fill=(255, 255, 255))
+        # mute / solo
+        if model.mix_mute[i]:
+            d.text((x + 4, bottom + 1), "M", fill=(255, 60, 60), font=_FONT)
+        if model.mix_solo[i]:
+            d.text((x + 18, bottom + 1), "S", fill=(80, 160, 255), font=_FONT)
+    return img
+
+
+def render_mixer(model: DisplayModel) -> bytes:
+    return to_framebuffer(draw_mixer(model))
+
+
 def draw(model: DisplayModel) -> Image.Image:
     if model.scale_active:
         return draw_scale_menu(model.scale_index, model.scale_root)
+    if model.mix_active:
+        return draw_mixer(model)
     """Build the 960x160 RGB image for the current state.
 
     Intentionally minimal — this is the surface you'll grow into the real UI

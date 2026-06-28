@@ -22,6 +22,9 @@ MSG_TRACK_NAME = 0x10
 MSG_TRACK_LEVEL = 0x11
 MSG_PARAM = 0x20
 MSG_SCALE = 0x30
+MSG_MIX_ACTIVE = 0x40
+MSG_MIX_META = 0x41
+MSG_MIX_LIVE = 0x42
 MSG_CLEAR = 0x7F
 
 
@@ -55,6 +58,24 @@ def track_level(index, value):
 
 def param(index, value, name):
     return _wrap([MSG_PARAM, index & 0x7F, value & 0x7F] + _ascii7(name[:10]))
+
+
+def mix_active(active):
+    return _wrap([MSG_MIX_ACTIVE, 1 if active else 0])
+
+
+def mix_meta(index, color, name):
+    """color is 0xRRGGBB; split each 8-bit channel into lo7 + hi1."""
+    r, g, b = (color >> 16) & 0xFF, (color >> 8) & 0xFF, color & 0xFF
+    return _wrap([MSG_MIX_META, index & 0x7F,
+                  r & 0x7F, (r >> 7) & 1,
+                  g & 0x7F, (g >> 7) & 1,
+                  b & 0x7F, (b >> 7) & 1] + _ascii7(name[:10]))
+
+
+def mix_live(index, volume, peak, muted, solo):
+    flags = (1 if muted else 0) | (2 if solo else 0)
+    return _wrap([MSG_MIX_LIVE, index & 0x7F, volume & 0x7F, peak & 0x7F, flags])
 
 
 def scale(active, index, root_pc):

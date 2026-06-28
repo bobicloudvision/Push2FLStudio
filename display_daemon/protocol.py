@@ -35,6 +35,9 @@ MSG_TRACK_NAME = 0x10      # [index, *ascii]
 MSG_TRACK_LEVEL = 0x11     # [index, value 0..127]
 MSG_PARAM = 0x20           # [encoder, value 0..127, *ascii name]
 MSG_SCALE = 0x30           # [active, scale_index, root_pc]
+MSG_MIX_ACTIVE = 0x40      # [active]  -> mixer screen on/off
+MSG_MIX_META = 0x41        # [idx, r_lo,r_hi, g_lo,g_hi, b_lo,b_hi, *ascii name]
+MSG_MIX_LIVE = 0x42        # [idx, vol 0..127, peak 0..127, flags(b0 mute,b1 solo)]
 MSG_CLEAR = 0x7F           # []  -> reset display model
 
 
@@ -56,6 +59,13 @@ class DisplayModel:
     scale_active: bool = False
     scale_index: int = 0
     scale_root: int = 0
+    mix_active: bool = False
+    mix_names: list = field(default_factory=lambda: [""] * 8)
+    mix_colors: list = field(default_factory=lambda: [(80, 80, 80)] * 8)
+    mix_vol: list = field(default_factory=lambda: [0] * 8)
+    mix_peak: list = field(default_factory=lambda: [0] * 8)
+    mix_mute: list = field(default_factory=lambda: [False] * 8)
+    mix_solo: list = field(default_factory=lambda: [False] * 8)
 
 
 def _decode_ascii(data) -> str:
@@ -93,5 +103,22 @@ def apply_sysex(model: DisplayModel, payload: list[int]) -> None:
         model.scale_active = bool(body[0])
         model.scale_index = body[1]
         model.scale_root = body[2]
+    elif msg_type == MSG_MIX_ACTIVE and body:
+        model.mix_active = bool(body[0])
+    elif msg_type == MSG_MIX_META and len(body) >= 7:
+        idx = body[0]
+        if 0 <= idx < 8:
+            r = (body[2] << 7) | body[1]
+            g = (body[4] << 7) | body[3]
+            b = (body[6] << 7) | body[5]
+            model.mix_colors[idx] = (r, g, b)
+            model.mix_names[idx] = _decode_ascii(body[7:])
+    elif msg_type == MSG_MIX_LIVE and len(body) >= 4:
+        idx = body[0]
+        if 0 <= idx < 8:
+            model.mix_vol[idx] = body[1]
+            model.mix_peak[idx] = body[2]
+            model.mix_mute[idx] = bool(body[3] & 1)
+            model.mix_solo[idx] = bool(body[3] & 2)
     elif msg_type == MSG_CLEAR:
         model.__init__()  # type: ignore[misc]  # reset to defaults

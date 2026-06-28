@@ -21,9 +21,14 @@ from .protocol import EDU_ID, DisplayModel, apply_sysex
 class MidiStateListener:
     """Opens *port_name* and applies incoming state SysEx to *model*."""
 
-    def __init__(self, model: DisplayModel, port_name: str) -> None:
+    def __init__(self, model: DisplayModel, port_name: str,
+                 virtual: bool = False, debug: bool = False,
+                 forward_port=None) -> None:
         self._model = model
         self._port_name = port_name
+        self._virtual = virtual
+        self._debug = debug
+        self._forward = forward_port   # open mido output to the Push (LEDs)
         self._port = None
         self._thread: threading.Thread | None = None
         self._running = False
@@ -33,7 +38,9 @@ class MidiStateListener:
         return mido.get_input_names()
 
     def start(self) -> None:
-        self._port = mido.open_input(self._port_name)
+        # virtual=True creates our OWN port (no IAC / Audio MIDI Setup needed);
+        # it appears system-wide so FL can send to it directly.
+        self._port = mido.open_input(self._port_name, virtual=self._virtual)
         self._running = True
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
@@ -42,9 +49,22 @@ class MidiStateListener:
         for msg in self._port:  # blocks; iterator ends when port closes
             if not self._running:
                 break
+            if self._debug:
+                if msg.type == "sysex":
+                    print(f"[recv] sysex {len(msg.data)} bytes, "
+                          f"id=0x{msg.data[0]:02X}" if msg.data else "[recv] sysex empty")
+                else:
+                    print(f"[recv] {msg}")
             if msg.type == "sysex" and msg.data and msg.data[0] == EDU_ID:
-                # msg.data excludes F0/F7; drop the EDU id, keep <type>+body
+                # Our display state — render it, do NOT pass to the Push.
                 apply_sysex(self._model, list(msg.data[1:]))
+            elif self._forward is not None:
+                # Everything else from FL (pad/button LEDs, palette sysex) is
+                # meant for the Push hardware — forward it on.
+                try:
+                    self._forward.send(msg)
+                except Exception:
+                    pass
 
     def stop(self) -> None:
         self._running = False

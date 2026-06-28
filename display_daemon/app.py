@@ -255,6 +255,26 @@ def main() -> int:
         "display. Works alongside FL Studio — no IAC/companion setup needed.",
     )
     parser.add_argument(
+        "--virtual",
+        action="store_true",
+        help="Create our own virtual MIDI input 'Push2FL Display' and listen "
+        "for FL state on it — no IAC / Audio MIDI Setup needed. Just route "
+        "FL's output to 'Push2FL Display'.",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Listen-only: print every MIDI message received on the bridge "
+        "port (no display). Use with --virtual or --midi-port to check that "
+        "FL is actually sending state.",
+    )
+    parser.add_argument(
+        "--no-forward",
+        action="store_true",
+        help="Don't forward Push LED MIDI to the hardware (use if FL outputs "
+        "to the Push directly instead of through this daemon).",
+    )
+    parser.add_argument(
         "--demo",
         action="store_true",
         help="Drive the display with an animated synthetic state (no FL "
@@ -280,17 +300,47 @@ def main() -> int:
     if args.demo:
         return _run_demo(args)
 
-    if not args.midi_port:
+    if not args.virtual and not args.midi_port:
         print("Available MIDI input ports:")
         for name in MidiStateListener.available_ports():
             print(f"  - {name}")
-        print("\nRe-run with: --midi-port \"<one of the above>\"")
+        print("\nRe-run with: --midi-port \"<one of the above>\"  or  --virtual")
         return 0
 
     model = DisplayModel()
-    listener = MidiStateListener(model, args.midi_port)
+    port_name = "Push2FL Display" if args.virtual else args.midi_port
+
+    # Router mode: FL outputs everything to our port; we forward the Push's
+    # MIDI (LEDs/palette) on to the hardware, keeping only display state.
+    forward_port = None
+    if not args.debug and not args.no_forward:
+        try:
+            forward_port = mido.open_output(args.pad_port)
+            print(f"Forwarding Push LEDs to '{args.pad_port}'.")
+        except (OSError, IOError) as exc:
+            print(f"Could not open Push output '{args.pad_port}' ({exc}); "
+                  "LEDs won't be forwarded.")
+
+    listener = MidiStateListener(model, port_name, virtual=args.virtual,
+                                 debug=args.debug, forward_port=forward_port)
     listener.start()
-    print(f"Listening for FL state on: {args.midi_port}")
+    if args.virtual:
+        print(f"Created virtual MIDI port '{port_name}'. In FL, route the "
+              "Push 2 FL Studio output to it (same Port number).")
+    else:
+        print(f"Listening for FL state on: {port_name}")
+
+    if args.debug:
+        print("DEBUG listen-only mode — printing received MIDI. Ctrl-C to stop.")
+        print("Now in FL: enter Mix mode / move a fader. You should see lines below.")
+        try:
+            while True:
+                time.sleep(0.2)
+        except KeyboardInterrupt:
+            print("\nStopping.")
+        finally:
+            listener.stop()
+        return 0
 
     interval = 1.0 / max(1, args.fps)
     try:
@@ -310,6 +360,8 @@ def main() -> int:
         return 0
     finally:
         listener.stop()
+        if forward_port is not None:
+            forward_port.close()
 
 
 if __name__ == "__main__":

@@ -27,11 +27,9 @@ def OnDeInit():
     pass
 
 
-def OnDispatch(message, sysex):
-    """Receive a dispatched SysEx and forward it to the virtual bus.
-
-    The main script calls device.dispatch(0, 0xF0, <sysex bytes>); FL delivers
-    it here. `sysex` is the full F0..F7 byte string.
-    """
-    if sysex:
-        device.midiOutSysex(bytes(sysex))
+def OnMidiIn(event):
+    """Dispatched messages from the main script arrive here. Forward any SysEx
+    out this script's output port (the virtual bus the daemon listens on)."""
+    if event.sysex:
+        device.midiOutSysex(bytes(event.sysex))
+        event.handled = True

@@ -36,6 +36,8 @@ _PUSH_PREFIX = [0xF0, 0x00, 0x21, 0x1D, 0x01, 0x01]
 # We remap palette indices 1..64 to the exact Channel Rack channel colors.
 # Index 0 = off; 122 = white (pressed); 124..127 used by transport — untouched.
 _CH_PALETTE_BASE = 1
+# Mixer track colors live in palette slots 100..107 (8 tracks).
+_MIX_PALETTE_BASE = 100
 
 _last = {
     "playing": None,
@@ -47,11 +49,14 @@ _last = {
 }
 
 _chan_colors = [None] * MAX_CHANNELS   # cache: last channel color synced
+_mix_colors = [None] * 8               # cache: last mixer-track color synced
 _pad_cache = {}                        # note -> last color sent
 _btn_cache = {}                        # cc -> last value sent
 
-# Pad modes: "drum" (pad -> channel) or "note" (chromatic piano-roll grid).
+# Pad modes: "drum" (pad -> channel), "note" (in-key grid), "mix" (mixer).
 _mode = "drum"
+_prev_play_mode = "drum"               # mode to restore when leaving mix
+MIX_TRACKS = 8                         # mixer tracks shown (1..8)
 _root = 48                             # root note (C3); octave buttons shift it
 IN_KEY_ROW_STEP = 3                    # scale-steps each row goes up (~a fourth)
 _scale = 0                             # active scale (applied live as you browse)
@@ -117,10 +122,18 @@ def _pad_to_channel(note):
 # Display mirroring (guarded; optional for this milestone)
 # --------------------------------------------------------------------------
 def _mirror(sysex_bytes):
+    # Two routes to the daemon; whichever is wired works, the other no-ops.
+    #  1) Direct: if the IAC bus output shares this controller's Port number,
+    #     device.midiOutSysex reaches it (and the Push, which ignores our id).
+    #  2) Companion: dispatch to the "Display Out" script, which re-emits it.
     try:
-        device.dispatch(0, 0xF0, sysex_bytes)
+        device.midiOutSysex(sysex_bytes)
     except Exception:
-        pass  # companion display-out script not configured — fine
+        pass
+    try:
+        device.dispatch(-1, 0xF4, sysex_bytes)
+    except Exception:
+        pass
 
 
 # --------------------------------------------------------------------------
@@ -156,9 +169,83 @@ def _note_pad_color(scale_index):
     return p2.PAD_GREEN
 
 
+def _sync_mix_palette():
+    """Mirror the 8 mixer-track colors into palette slots 100..107."""
+    count = mixer.trackCount()
+    changed = False
+    for i in range(8):
+        track = i + 1
+        c = mixer.getTrackColor(track) if track < count else 0
+        if _mix_colors[i] != c:
+            _mix_colors[i] = c
+            _set_palette(_MIX_PALETTE_BASE + i,
+                         (c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF)
+            changed = True
+    if changed:
+        _reapply_palette()
+
+
+def _refresh_mix_meters():
+    """Each column = a mixer track: bar in the track's own color = live output
+    level (peak). The fader setting is shown on the screen, not the pads."""
+    _sync_mix_palette()
+    count = mixer.trackCount()
+    for col in range(p2.PAD_COLS):
+        track = col + 1
+        present = track < count
+        peak = mixer.getTrackPeaks(track, 0) if present else 0.0
+        peak_lit = int(round(max(0.0, min(1.0, peak)) * p2.PAD_ROWS))
+        bar_color = _MIX_PALETTE_BASE + col if present else p2.PAD_OFF
+        for row in range(p2.PAD_ROWS):
+            _pad_led(p2.pad_note(row, col), bar_color if row < peak_lit else p2.PAD_OFF)
+
+
+def _refresh_mix_buttons():
+    """Lower display row = mute, upper row = solo (per track), with LEDs."""
+    count = mixer.trackCount()
+    for i in range(MIX_TRACKS):
+        track = i + 1
+        present = track < count
+        muted = present and mixer.isTrackMuted(track)
+        solo = present and mixer.isTrackSolo(track)
+        _btn_led(p2.BTN_BELOW_DISPLAY_CC[i], p2.PAD_RED if muted else (WHITE_BTN_GLOW if present else p2.PAD_OFF))
+        _btn_led(p2.BTN_ABOVE_DISPLAY_CC[i], p2.PAD_BLUE if solo else (WHITE_BTN_GLOW if present else p2.PAD_OFF))
+
+
+def _clear_mix_buttons():
+    for cc in p2.BTN_BELOW_DISPLAY_CC + p2.BTN_ABOVE_DISPLAY_CC:
+        _btn_led(cc, p2.PAD_OFF)
+
+
+def _mirror_mix_meta():
+    """Send each track's name + color to the display (changes rarely)."""
+    count = mixer.trackCount()
+    for i in range(MIX_TRACKS):
+        track = i + 1
+        if track < count:
+            _mirror(proto.mix_meta(i, mixer.getTrackColor(track),
+                                   mixer.getTrackName(track)))
+
+
+def _mirror_mix_live():
+    """Send each track's volume + peak + mute/solo to the display."""
+    count = mixer.trackCount()
+    for i in range(MIX_TRACKS):
+        track = i + 1
+        if track >= count:
+            continue
+        vol = int(max(0.0, min(1.0, mixer.getTrackVolume(track))) * 127)
+        peak = int(max(0.0, min(1.0, mixer.getTrackPeaks(track, 0))) * 127)
+        _mirror(proto.mix_live(i, vol, peak,
+                               mixer.isTrackMuted(track), mixer.isTrackSolo(track)))
+
+
 def _refresh_pads():
     """Light the pads for the current mode."""
     _sync_palette()
+    if _mode == "mix":
+        _refresh_mix_meters()
+        return
     if _mode == "note":
         for note in range(p2.PAD_NOTE_MIN, p2.PAD_NOTE_MAX + 1):
             si = _pad_scale_index(note)
@@ -219,6 +306,7 @@ def OnDeInit():
     _btn_led(p2.BTN_STOP, p2.PAD_OFF)
     for cc in p2.BUTTONS_WHITE:
         _btn_led(cc, p2.PAD_OFF)
+    _clear_mix_buttons()
     _mirror(proto.clear())
 
 
@@ -232,10 +320,26 @@ def OnMidiMsg(event):
             event.handled = True
         return
 
-    # Buttons (press only, value 127)
-    if status == 0xB0 and event.data2 == 127:
-        _handle_button(event.data1)
-        event.handled = True
+    if status == 0xB0:
+        cc, val = event.data1, event.data2
+        if cc in p2.ENCODER_TRACK_CC:
+            _handle_encoder(p2.ENCODER_TRACK_CC.index(cc), p2.decode_relative(val))
+            event.handled = True
+        elif val == 127:                      # button press
+            _handle_button(cc)
+            event.handled = True
+
+
+def _handle_encoder(idx, delta):
+    """Mix mode: encoder idx adjusts mixer track (idx+1) volume."""
+    if _mode != "mix":
+        return
+    track = idx + 1
+    if track >= mixer.trackCount():
+        return
+    vol = mixer.getTrackVolume(track)
+    mixer.setTrackVolume(track, max(0.0, min(1.0, vol + delta * 0.02)))
+    _refresh_mix_meters()
 
 
 def _toggle_scale_mode():
@@ -291,7 +395,33 @@ def _handle_pad(event):
 
 
 def _handle_button(cc):
-    global _mode
+    global _mode, _prev_play_mode
+    if cc == p2.BTN_MIX:
+        if _mode != "mix":
+            _prev_play_mode = _mode
+            _mode = "mix"
+        else:
+            _mode = _prev_play_mode
+            _clear_mix_buttons()
+        _pad_cache.clear()
+        _refresh_pads()
+        _refresh_mode_leds()
+        if _mode == "mix":
+            _refresh_mix_buttons()
+            _mirror(proto.mix_active(True))
+            _mirror_mix_meta()
+        else:
+            _mirror(proto.mix_active(False))
+        return
+    if _mode == "mix":
+        if cc in p2.BTN_BELOW_DISPLAY_CC:
+            mixer.muteTrack(p2.BTN_BELOW_DISPLAY_CC.index(cc) + 1)
+            _refresh_mix_buttons()
+            return
+        if cc in p2.BTN_ABOVE_DISPLAY_CC:
+            mixer.soloTrack(p2.BTN_ABOVE_DISPLAY_CC.index(cc) + 1)
+            _refresh_mix_buttons()
+            return
     if cc == p2.BTN_SCALE:
         _toggle_scale_mode()
         return
@@ -328,8 +458,9 @@ def _handle_button(cc):
 
 
 def _refresh_mode_leds():
-    """Light the Note button bright in note mode, dim glow in drum mode."""
+    """Highlight the active mode's button."""
     _btn_led(p2.BTN_NOTE, 127 if _mode == "note" else WHITE_BTN_GLOW)
+    _btn_led(p2.BTN_MIX, 127 if _mode == "mix" else WHITE_BTN_GLOW)
     active = p2.PAD_WHITE if _mode == "note" else p2.PAD_OFF
     _btn_led(p2.BTN_OCTAVE_UP, active)
     _btn_led(p2.BTN_OCTAVE_DOWN, active)
@@ -346,4 +477,7 @@ def OnUpdateBeatIndicator(value):
 
 
 def OnIdle():
-    pass
+    if _mode == "mix":
+        _refresh_mix_meters()           # live VU on the pads
+        _mirror(proto.mix_active(True))  # re-assert so a late daemon syncs
+        _mirror_mix_live()              # live faders/levels on the display

@@ -90,6 +90,20 @@ def _btn_led(cc, value):
     device.midiOutMsg(0xB0 + (cc << 8) + (value << 16))
 
 
+# LED animation channels (Push 2 spec). Animations need MIDI clock, which we
+# enable with device.setMasterSync(True). channel 0 = solid; these animate.
+ANIM_PULSE_QUARTER = 9
+ANIM_BLINK_QUARTER = 14
+
+
+def _btn_anim(cc, base_color, second_color, anim_channel):
+    """Animate a button LED: it transitions between base (channel 0) and the
+    second color on the given animation channel. Bypasses the LED cache."""
+    _btn_cache.pop(cc, None)
+    device.midiOutMsg(0xB0 + (cc << 8) + (base_color << 16))
+    device.midiOutMsg((0xB0 | anim_channel) + (cc << 8) + (second_color << 16))
+
+
 def _set_palette(index, r, g, b):
     """Define Push palette entry `index` as 8-bit r/g/b (white left at 0)."""
     msg = _PUSH_PREFIX + [0x03, index & 0x7F,
@@ -280,13 +294,23 @@ def _refresh_white_buttons():
         _btn_led(cc, WHITE_BTN_GLOW)
 
 
+_rec_led_state = None  # tracks Record LED so the pulse is set once per change
+
+
 def _refresh_transport():
+    global _rec_led_state
     playing = transport.isPlaying()
     recording = transport.isRecording()
     # Default white; light up in their state color when active.
     _btn_led(p2.BTN_PLAY, p2.PAD_GREEN if playing else p2.PAD_WHITE)
-    _btn_led(p2.BTN_RECORD, p2.PAD_RED if recording else p2.PAD_WHITE)
     _btn_led(p2.BTN_STOP, p2.PAD_WHITE)
+    if recording != _rec_led_state:
+        _rec_led_state = recording
+        if recording:
+            # Pulse red (tempo-synced) while recording.
+            _btn_anim(p2.BTN_RECORD, p2.PAD_RED, p2.PAD_OFF, ANIM_PULSE_QUARTER)
+        else:
+            _btn_led(p2.BTN_RECORD, p2.PAD_WHITE)
 
     bpm = int(round(mixer.getCurrentTempo() / 1000.0))
     if (playing, recording, bpm) != (_last["playing"], _last["recording"], _last["bpm"]):
@@ -298,6 +322,10 @@ def _refresh_transport():
 # FL Studio callbacks
 # --------------------------------------------------------------------------
 def OnInit():
+    try:
+        device.setMasterSync(True)   # send MIDI clock so LED animations run
+    except Exception:
+        pass
     _refresh_pads()
     _refresh_white_buttons()
     _refresh_mode_leds()

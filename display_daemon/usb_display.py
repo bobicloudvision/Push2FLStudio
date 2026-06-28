@@ -20,11 +20,27 @@ Spec: Ableton/push-interface (AbletonPush2MIDIDisplayInterface.asc).
 
 from __future__ import annotations
 
+import os
+import sys
+
+import usb.backend.libusb1
 import usb.core
 import usb.util
 
 PUSH2_VENDOR_ID = 0x2982
 PUSH2_PRODUCT_ID = 0x1967
+
+
+def _libusb_backend():
+    """Get the libusb backend. When frozen by PyInstaller, the bundled
+    libusb-1.0.dylib sits in the unpack dir, so point pyusb at it directly."""
+    base = getattr(sys, "_MEIPASS", None)
+    if base:
+        for name in ("libusb-1.0.dylib", "libusb-1.0.so", "libusb-1.0.dll"):
+            cand = os.path.join(base, name)
+            if os.path.exists(cand):
+                return usb.backend.libusb1.get_backend(find_library=lambda x: cand)
+    return usb.backend.libusb1.get_backend()
 
 DISPLAY_ENDPOINT = 0x01
 
@@ -59,7 +75,8 @@ class Push2Display:
         self._device = None
 
     def open(self) -> None:
-        dev = usb.core.find(idVendor=PUSH2_VENDOR_ID, idProduct=PUSH2_PRODUCT_ID)
+        dev = usb.core.find(idVendor=PUSH2_VENDOR_ID, idProduct=PUSH2_PRODUCT_ID,
+                            backend=_libusb_backend())
         if dev is None:
             raise Push2DisplayNotFound(
                 "Push 2 not found on USB. Check the cable and that no other "
